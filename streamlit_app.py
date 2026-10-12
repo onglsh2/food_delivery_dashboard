@@ -268,3 +268,66 @@ fig_step_bar = px.bar(
 )
 fig_step_bar.update_layout(xaxis_title="전환율 (%)", yaxis_title="")
 right_comp.plotly_chart(fig_step_bar, width="stretch")
+
+# ------------------------------------------------------------
+# 5. 드릴다운: 언제부터, 무엇 때문일까 영역
+# ------------------------------------------------------------
+st.divider()
+st.subheader("드릴다운: 언제부터, 무엇 때문일까")
+
+# selectbox 2개 나란히 배치
+col1, col2 = st.columns(2)
+
+# 1) 자세히 볼 집단: 위의 비교 기준(st.radio)에서 고른 축의 값 중에서 (f에 있는 값만)
+available_groups = sorted(f[group_col].unique())
+selected_group = col1.selectbox("자세히 볼 집단", options=available_groups)
+
+# 2) 단계 선택
+step_options = {
+    "방문 → 식당조회": ("세션수", "조회세션"),
+    "식당조회 → 장바구니": ("조회세션", "장바구니세션"),
+    "장바구니 → 결제시작": ("장바구니세션", "결제시작세션"),
+    "결제시작 → 주문": ("결제시작세션", "주문세션")
+}
+selected_step_name = col2.selectbox("단계", options=list(step_options.keys()))
+
+prev_col_name, curr_col_name = step_options[selected_step_name]
+other_col = "유입경로" if group_col == "플랫폼" else "플랫폼"
+
+# 차트 ① (위): 고른 집단만 남긴 뒤, 다른 축별로 주별 전환율 선 차트
+df_drill_1 = f[f[group_col] == selected_group].groupby(["주시작일", other_col])[[prev_col_name, curr_col_name]].sum().reset_index()
+df_drill_1["전환율"] = df_drill_1.apply(
+    lambda row: (row[curr_col_name] / row[prev_col_name] * 100) if row[prev_col_name] > 0 else None,
+    axis=1
+)
+
+fig_drill_1 = px.line(
+    df_drill_1,
+    x="주시작일",
+    y="전환율",
+    color=other_col,
+    markers=True,
+    title=f"① {selected_group}의 주별 {selected_step_name} 전환율 — {other_col}별로 쪼개 보기"
+)
+fig_drill_1.update_layout(yaxis_title="전환율 (%)", xaxis_title="")
+st.plotly_chart(fig_drill_1, width="stretch")
+st.caption("모든 갈래가 같은 시점에 함께 움직였다면, 그 축은 원인이 아닙니다.")
+
+# 차트 ② (아래): 결제실패 건수를 주별 막대로, 고른 집단(진한 빨간색) vs 그 외(회색, 하나로 합침)
+df_drill_2 = f.copy()
+df_drill_2["그룹구분"] = df_drill_2[group_col].apply(lambda x: selected_group if x == selected_group else "그 외")
+
+df_fail_agg = df_drill_2.groupby(["주시작일", "그룹구분"])["결제실패"].sum().reset_index()
+
+fig_drill_2 = px.bar(
+    df_fail_agg,
+    x="주시작일",
+    y="결제실패",
+    color="그룹구분",
+    barmode="group",
+    color_discrete_map={selected_group: "#d62728", "그 외": "#7f7f7f"},
+    title=f"주별 결제실패 건수 ({selected_group} vs 그 외)"
+)
+fig_drill_2.update_layout(yaxis_title="결제실패 건수", xaxis_title="")
+st.plotly_chart(fig_drill_2, width="stretch")
+st.caption("문제가 생긴 시점과 함께 움직였다면 원인 후보입니다. 함께 움직였다고 원인이 확정되지는 않습니다.")
